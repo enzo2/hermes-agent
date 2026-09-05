@@ -270,6 +270,113 @@ class TestClearCommand:
         assert "Fallback chain cleared" in out
 
 
+def _seed_chain(home: Path) -> None:
+    _write_config(home, {
+        "fallback_providers": [
+            {"provider": "openrouter", "model": "gpt-5.4"},
+            {"provider": "nous", "model": "Hermes-4"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+        ],
+    })
+
+
+class TestReorderCommand:
+    def test_reorder_by_position(self, isolated_home, capsys):
+        _seed_chain(isolated_home)
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        cmd_fallback_reorder(types.SimpleNamespace(target="3"))
+
+        cfg = _read_config(isolated_home)
+        assert cfg["fallback_providers"][0] == {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+        }
+        assert [e["provider"] for e in cfg["fallback_providers"]] == [
+            "anthropic", "openrouter", "nous",
+        ]
+        out = capsys.readouterr().out
+        assert "Moved to front" in out
+        assert "claude-sonnet-4-6" in out
+
+    def test_reorder_by_provider_model(self, isolated_home, capsys):
+        _seed_chain(isolated_home)
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        cmd_fallback_reorder(types.SimpleNamespace(target="nous/Hermes-4"))
+
+        cfg = _read_config(isolated_home)
+        assert cfg["fallback_providers"][0]["model"] == "Hermes-4"
+
+    def test_reorder_is_case_insensitive(self, isolated_home):
+        _seed_chain(isolated_home)
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        cmd_fallback_reorder(types.SimpleNamespace(target="NOUS/hermes-4"))
+
+        cfg = _read_config(isolated_home)
+        assert cfg["fallback_providers"][0]["provider"] == "nous"
+
+    def test_reorder_already_first_is_noop(self, isolated_home, capsys):
+        _seed_chain(isolated_home)
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        cmd_fallback_reorder(types.SimpleNamespace(target="1"))
+
+        cfg = _read_config(isolated_home)
+        assert [e["provider"] for e in cfg["fallback_providers"]] == [
+            "openrouter", "nous", "anthropic",
+        ]
+        out = capsys.readouterr().out
+        assert "already first" in out
+
+    def test_reorder_out_of_range_position_exits(self, isolated_home):
+        _seed_chain(isolated_home)
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        with pytest.raises(SystemExit):
+            cmd_fallback_reorder(types.SimpleNamespace(target="9"))
+
+    def test_reorder_unknown_model_exits(self, isolated_home):
+        _seed_chain(isolated_home)
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        with pytest.raises(SystemExit):
+            cmd_fallback_reorder(types.SimpleNamespace(target="nous/nope"))
+
+    def test_reorder_empty_chain_prints_noop(self, isolated_home, capsys):
+        _write_config(isolated_home, {})
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        cmd_fallback_reorder(types.SimpleNamespace(target="1"))
+        out = capsys.readouterr().out
+        assert "nothing to reorder" in out
+
+    def test_reorder_single_entry_prints_noop(self, isolated_home, capsys):
+        _write_config(isolated_home, {
+            "fallback_providers": [{"provider": "nous", "model": "Hermes-4"}],
+        })
+        from hermes_cli.fallback_cmd import cmd_fallback_reorder
+        cmd_fallback_reorder(types.SimpleNamespace(target=None))
+        out = capsys.readouterr().out
+        assert "already first" in out
+
+    def test_reorder_interactive_picker(self, isolated_home, capsys):
+        _seed_chain(isolated_home)
+        with patch("hermes_cli.setup._curses_prompt_choice", return_value=2):
+            from hermes_cli.fallback_cmd import cmd_fallback_reorder
+            cmd_fallback_reorder(types.SimpleNamespace(target=None))
+
+        cfg = _read_config(isolated_home)
+        assert cfg["fallback_providers"][0]["provider"] == "anthropic"
+        out = capsys.readouterr().out
+        assert "Moved to front" in out
+
+    def test_reorder_interactive_cancel_is_noop(self, isolated_home):
+        _seed_chain(isolated_home)
+        with patch("hermes_cli.setup._curses_prompt_choice", return_value=3):
+            from hermes_cli.fallback_cmd import cmd_fallback_reorder
+            cmd_fallback_reorder(types.SimpleNamespace(target=None))
+
+        cfg = _read_config(isolated_home)
+        assert [e["provider"] for e in cfg["fallback_providers"]] == [
+            "openrouter", "nous", "anthropic",
+        ]
+
+
 # ---------------------------------------------------------------------------
 # cmd_fallback dispatcher
 # ---------------------------------------------------------------------------
@@ -282,6 +389,12 @@ class TestDispatcher:
         from hermes_cli.fallback_cmd import cmd_fallback
         with pytest.raises(SystemExit):
             cmd_fallback(types.SimpleNamespace(fallback_command="nope"))
+
+    def test_reorder_routes_to_handler(self, isolated_home, capsys):
+        _write_config(isolated_home, {})
+        from hermes_cli.fallback_cmd import cmd_fallback
+        cmd_fallback(types.SimpleNamespace(fallback_command="reorder", target=None))
+        assert "nothing to reorder" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -312,3 +425,4 @@ class TestArgparseWiring:
         assert "add" in out
         assert "remove" in out
         assert "clear" in out
+        assert "reorder" in out

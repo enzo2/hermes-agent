@@ -321,12 +321,19 @@ class TestSignalPhoneRedaction:
         monkeypatch.delenv("HERMES_REDACT_SECRETS", raising=False)
         monkeypatch.setattr("agent.redact._REDACT_ENABLED", True)
 
-    def test_us_number(self):
+    def test_us_number_passes_through_for_tool_calls(self):
+        """Phone numbers are actionable identifiers, not secrets.
+
+        Secret redaction must not corrupt a value the model may need to pass
+        unchanged into a tool call such as voice_call_ws(to=...). Display
+        masking lives in gateway.platforms.helpers.redact_phone.
+        """
         from agent.redact import redact_sensitive_text
-        result = redact_sensitive_text("Call +15551234567 now")
-        assert "+15551234567" not in result
-        assert "+155" in result  # Prefix preserved
-        assert "4567" in result  # Suffix preserved
+        number = "+" + "12015550199"
+        text = f"Call {number} now"
+        assert redact_sensitive_text(text, force=True) == text
+        payload = '{"to": "%s"}' % number
+        assert redact_sensitive_text(payload, force=True) == payload
 
 
 # ---------------------------------------------------------------------------

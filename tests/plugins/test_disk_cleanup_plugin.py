@@ -314,6 +314,31 @@ class TestPostToolCallHook:
         data = json.loads(tracked_file.read_text())
         assert any(Path(i["path"]) == p.resolve() for i in data)
 
+    def test_terminal_command_ignores_inaccessible_container_path(
+        self, _isolate_env, monkeypatch
+    ):
+        """A container-only path must not make the best-effort hook raise."""
+        pi = _load_plugin_init()
+        inaccessible = "/root/.hermes/skills/example/scripts/check.py"
+        original_exists = pi.Path.exists
+
+        def raise_for_container_path(path):
+            if str(path) == inaccessible:
+                raise PermissionError("container path is not visible to the host")
+            return original_exists(path)
+
+        monkeypatch.setattr(pi.Path, "exists", raise_for_container_path)
+        pi._on_post_tool_call(
+            tool_name="terminal",
+            args={"command": f"python3 {inaccessible}"},
+            result="",
+            task_id="t-container",
+            session_id="s-container",
+        )
+
+        tracked_file = _isolate_env / "disk-cleanup" / "tracked.json"
+        assert not tracked_file.exists()
+
     def test_ignores_unrelated_tool(self, _isolate_env):
         pi = _load_plugin_init()
         pi._on_post_tool_call(

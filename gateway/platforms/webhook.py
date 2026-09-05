@@ -30,6 +30,7 @@ except ImportError:
     web = None  # type: ignore[assignment]
 
 from gateway.config import Platform, PlatformConfig
+from hermes_cli.config import _expand_env_vars
 from gateway.platforms.base import BasePlatformAdapter, MessageEvent, MessageType, SendResult
 from gateway.platforms.webhook_filters import DEFAULT_SCRIPT_TIMEOUT_SECONDS, WebhookRouteProcessor
 from gateway.response_filters import is_autonomous_silence_response
@@ -160,7 +161,14 @@ class WebhookAdapter(BasePlatformAdapter):
         self._host: Optional[str] = extra.get("host", DEFAULT_HOST) or None
         self._port: int = int(extra.get("port", DEFAULT_PORT))
         self._global_secret: str = extra.get("secret", "")
-        self._static_routes: Dict[str, dict] = extra.get("routes", {})
+        # PlatformConfig.extra is built from the raw user config; static route
+        # values therefore still contain ${ENV_VAR} references unless we expand
+        # them here. Resolve once at startup so a route can keep its HMAC
+        # secret in the service environment rather than config.yaml.
+        static_routes = _expand_env_vars(extra.get("routes") or {})
+        self._static_routes: Dict[str, dict] = (
+            static_routes if isinstance(static_routes, dict) else {}
+        )
         self._dynamic_routes: Dict[str, dict] = {}
         self._dynamic_routes_mtime: float = 0.0
         self._routes: Dict[str, dict] = dict(self._static_routes)

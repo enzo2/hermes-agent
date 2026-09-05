@@ -134,3 +134,25 @@ def test_stale_symbol_scenario_end_to_end():
         sys.modules.pop(name, None)
         if real is not None:
             sys.modules[name] = real
+
+
+def test_purge_evicts_top_level_run_agent_module():
+    """The top-level ``run_agent`` module must not straddle an update.
+
+    ``agent.turn_liveness`` is purged by package prefix, but ``run_agent`` is
+    a first-party top-level module. Leaving its old caller cached can combine
+    the pre-scheduler ``make_thread()`` call site with the post-scheduler
+    watchdog class on the next turn.
+    """
+    name = "run_agent"
+    real = sys.modules.get(name)
+    sys.modules[name] = _fake_module(name)
+    try:
+        update_cmd._purge_stale_hermes_modules()
+        assert name not in sys.modules or not getattr(
+            sys.modules[name], "__stale_sentinel__", False
+        )
+    finally:
+        sys.modules.pop(name, None)
+        if real is not None:
+            sys.modules[name] = real

@@ -322,9 +322,6 @@ _URL_BARE_TOKEN_RE = re.compile(
 # JWTs always start with "eyJ" (base64 "{"); 1-, 2- and 3-part forms.
 _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_=-]{4,}){0,2}")
 
-# E.164 phone numbers, 7-15 digits; the lookahead rejects hex strings / identifiers.
-_SIGNAL_PHONE_RE = re.compile(r"(\+[1-9]\d{6,14})(?![A-Za-z0-9])")
-
 # CDP-URL path: web URLs with a query string / with ``user:password@`` userinfo
 # (DB protocols are covered by _DB_CONNSTR_RE).
 _URL_WITH_QUERY_RE = re.compile(r"(https?|wss?|ftp)://([^\s/?#]+)([^\s?#]*)\?([^\s#]+)(#\S*)?")
@@ -549,12 +546,6 @@ def _redact_url_credentials(text: str, code_file: bool) -> str:
     return _URL_BARE_TOKEN_RE.sub(lambda m: f"{m.group(1)}{_mask_token(m.group(2))}{m.group(3)}", text)
 
 
-def _redact_phone(m):
-    phone = m.group(1)
-    keep = 2 if len(phone) <= 8 else 4
-    return phone[:keep] + "****" + phone[-keep:]
-
-
 def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = False,
                           file_read: bool = False, redact_url_credentials: bool = False) -> str:
     """Apply all redaction patterns to a block of text.
@@ -636,8 +627,9 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     if "&" in text and "=" in text:
         text = _redact_form_body(text)
 
-    if "+" in text:
-        text = _SIGNAL_PHONE_RE.sub(_redact_phone, text)
+    # Phone numbers are actionable identifiers (voice_call_ws, Signal, SMS),
+    # not secrets. Masking them here corrupts later tool calls. Display-only
+    # masking lives in gateway.platforms.helpers.redact_phone.
 
     return text
 

@@ -102,6 +102,18 @@ def test_auto_mount_host_cwd_adds_volume(monkeypatch, tmp_path):
     assert f"{project_dir}:/workspace" in run_args_str
 
 
+def test_ephemeral_root_tmpfs_is_traversable_for_unprivileged_skill_mounts(monkeypatch):
+    """A non-root image user must traverse /root to reach /root/.hermes/skills."""
+    monkeypatch.setattr(docker_env, "find_docker", lambda: "/usr/bin/docker")
+    calls = _mock_subprocess_run(monkeypatch)
+
+    _make_dummy_env(run_as_host_user=True, persist_across_processes=False)
+
+    run_calls = [c for c in calls if isinstance(c[0], list) and len(c[0]) >= 2 and c[0][1] == "run"]
+    assert run_calls, "docker run should have been called"
+    assert "/root:rw,exec,mode=755,size=1g" in run_calls[0][0]
+
+
 def test_non_persistent_cleanup_removes_container(monkeypatch):
     """When persist_across_processes=false, cleanup() must docker stop AND
     docker rm so containers don't leak across hermes processes.

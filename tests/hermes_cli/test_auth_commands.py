@@ -1127,3 +1127,141 @@ def test_qwen_oauth_login_marks_active_through_moved_owner(monkeypatch):
 
     assert auth_commands._qwen_oauth_login(None) is creds
     assert marked == [creds]
+
+
+def test_auth_reorder_moves_credential_to_front(tmp_path, monkeypatch, capsys):
+    """`hermes auth reorder <provider> <target>` promotes the chosen entry to #1."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "openai-codex": [
+                    {
+                        "id": "codex-1",
+                        "label": "first@example.com",
+                        "auth_type": "oauth",
+                        "priority": 0,
+                        "source": "manual:device_code",
+                        "access_token": _jwt_with_email("first@example.com"),
+                        "refresh_token": "refresh-1",
+                    },
+                    {
+                        "id": "codex-2",
+                        "label": "second@example.com",
+                        "auth_type": "oauth",
+                        "priority": 1,
+                        "source": "manual:device_code",
+                        "access_token": _jwt_with_email("second@example.com"),
+                        "refresh_token": "refresh-2",
+                    },
+                ]
+            },
+        },
+    )
+
+    from hermes_cli.auth_commands import auth_reorder_command
+
+    class _Args:
+        provider = "openai-codex"
+        target = "2"
+
+    auth_reorder_command(_Args())
+
+    out = capsys.readouterr().out
+    assert 'Moved openai-codex credential #2 ("second@example.com") to the top' in out
+
+    payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
+    entries = payload["credential_pool"]["openai-codex"]
+    assert [entry["id"] for entry in entries] == ["codex-2", "codex-1"]
+    assert [entry["priority"] for entry in entries] == [0, 1]
+    assert entries[0]["label"] == "second@example.com"
+    assert entries[0]["access_token"] == _jwt_with_email("second@example.com")
+    assert entries[0]["refresh_token"] == "refresh-2"
+    assert entries[1]["access_token"] == _jwt_with_email("first@example.com")
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("openai-codex")
+    assert [entry.id for entry in pool.entries()] == ["codex-2", "codex-1"]
+    current = pool.peek()
+    assert current is not None and current.id == "codex-2"
+
+
+def test_auth_reorder_by_label_and_already_top_noop(tmp_path, monkeypatch, capsys):
+    """Reorder accepts id/label targets and reports a no-op when already #1."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "openrouter": [
+                    {
+                        "id": "or-a",
+                        "label": "main-key",
+                        "auth_type": "api_key",
+                        "priority": 0,
+                        "source": "manual",
+                        "access_token": "sk-or-main",
+                    },
+                    {
+                        "id": "or-b",
+                        "label": "spare-key",
+                        "auth_type": "api_key",
+                        "priority": 1,
+                        "source": "manual",
+                        "access_token": "sk-or-spare",
+                    },
+                ]
+            },
+        },
+    )
+
+    from types import SimpleNamespace
+    from hermes_cli.auth_commands import auth_reorder_command
+
+    auth_reorder_command(SimpleNamespace(provider="openrouter", target="spare-key"))
+    capsys.readouterr()
+
+    auth_reorder_command(SimpleNamespace(provider="openrouter", target="spare-key"))
+    out = capsys.readouterr().out
+    assert '"spare-key") is already at the top.' in out
+
+    payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
+    entries = payload["credential_pool"]["openrouter"]
+    assert [entry["id"] for entry in entries] == ["or-b", "or-a"]
+    assert [entry["priority"] for entry in entries] == [0, 1]
+
+
+def test_auth_reorder_rejects_unknown_target(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "openai-codex": [
+                    {
+                        "id": "codex-1",
+                        "label": "only@example.com",
+                        "auth_type": "oauth",
+                        "priority": 0,
+                        "source": "manual:device_code",
+                        "access_token": _jwt_with_email("only@example.com"),
+                        "refresh_token": "refresh-1",
+                    }
+                ]
+            },
+        },
+    )
+
+    from hermes_cli.auth_commands import auth_reorder_command
+
+    class _Args:
+        provider = "openai-codex"
+        target = "9"
+
+    with pytest.raises(SystemExit):
+        auth_reorder_command(_Args())

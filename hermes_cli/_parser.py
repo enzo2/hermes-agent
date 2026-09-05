@@ -78,6 +78,7 @@ Examples:
     hermes fallback [list]        Show fallback provider chain
     hermes fallback add           Add a fallback provider (same picker as `hermes model`)
     hermes fallback remove        Remove a fallback provider from the chain
+    hermes fallback reorder       Move a fallback entry to the front of the chain
     hermes config                 View configuration
     hermes config edit            Edit config in $EDITOR
     hermes config set model gpt-4 Set a config value

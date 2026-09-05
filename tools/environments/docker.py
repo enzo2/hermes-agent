@@ -663,7 +663,16 @@ class DockerEnvironment(BaseEnvironment):
                 writable_args += ["-v", f"{self._workspace_dir}:/workspace"]
         else:
             writable_args += ["--tmpfs", "/workspace:rw,exec,size=10g"] if mount_workspace else []
-            writable_args += ["--tmpfs", "/home:rw,exec,size=1g", "--tmpfs", "/root:rw,exec,size=1g"]
+            writable_args += [
+                "--tmpfs", "/home:rw,exec,size=1g",
+                # Skill and credential mounts live under /root/.hermes. An
+                # image configured with an unprivileged USER must be able to
+                # traverse the empty tmpfs parent to reach its read-only
+                # mounts; mode 700 causes every such skill script to fail
+                # with EACCES. The tmpfs remains isolated and writable only
+                # to root.
+                "--tmpfs", "/root:rw,exec,mode=755,size=1g",
+            ]
 
         if bind_host_cwd:
             logger.info("Mounting configured host cwd to /workspace: %s", host_cwd_abs)

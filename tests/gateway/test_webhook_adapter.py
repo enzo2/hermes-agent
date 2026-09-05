@@ -68,6 +68,15 @@ def _make_adapter(routes=None, **kwargs):
     return WebhookAdapter(config)
 
 
+def test_static_route_secret_expands_environment_reference(monkeypatch):
+    """Static HMAC secrets may stay in the gateway service environment."""
+    monkeypatch.setenv("WEBHOOK_ROUTE_TEST_SECRET", "resolved-test-secret")
+    adapter = _make_adapter(routes={
+        "test": {"secret": "${WEBHOOK_ROUTE_TEST_SECRET}", "prompt": "hello"},
+    })
+    assert adapter._routes["test"]["secret"] == "resolved-test-secret"
+
+
 def _create_app(adapter: WebhookAdapter) -> web.Application:
     """Build the aiohttp Application from the adapter (without starting a full server)."""
     # Mirror connect(): client_max_size enforces the cap on chunked bodies.

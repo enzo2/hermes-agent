@@ -2164,6 +2164,30 @@ class CredentialPool:
                 self._current_id = None
             return removed
 
+    def move_to_front(self, index: int) -> Optional[PooledCredential]:
+        """Promote the entry at 1-based *index* to the front of the pool.
+
+        Reorders ``self._entries`` so the chosen entry becomes first and
+        reindexes priorities to match the new order, then persists — the same
+        write path as :meth:`remove_index`, so the on-disk pool stays
+        consistent with the in-memory order. Selection strategies that honor
+        priority (``fill_first`` default, round-robin, least-leased) pick the
+        promoted entry first; ``random`` ignores order by design.
+
+        Returns the moved entry, or ``None`` when *index* is out of range.
+        """
+        with self._lock:
+            if index < 1 or index > len(self._entries):
+                return None
+            moved = self._entries.pop(index - 1)
+            self._entries.insert(0, moved)
+            self._entries = [replace(entry, priority=p) for p, entry in enumerate(self._entries)]
+            persist_pool_entries(
+                self.provider,
+                [entry.to_dict() for entry in self._entries],
+            )
+            return moved
+
     def resolve_target(self, target: Any) -> Tuple[Optional[int], Optional[PooledCredential], Optional[str]]:
         raw = str(target or "").strip()
         if not raw:

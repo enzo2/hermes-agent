@@ -10,10 +10,13 @@ thread.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 from agent.turn_liveness import (
     DEFAULT_TURN_LIVENESS_POLL_S,
     DEFAULT_TURN_LIVENESS_TIMEOUT_S,
+    TurnLivenessWatchdog,
     resolve_turn_liveness_settings,
 )
 
@@ -137,3 +140,37 @@ def test_malformed_sections_fall_back_to_defaults(caplog):
     assert result == (DEFAULT_TURN_LIVENESS_TIMEOUT_S, DEFAULT_TURN_LIVENESS_POLL_S)
     # The malformed section itself is surfaced as a warning.
     assert len(caplog.records) >= 1
+
+
+def test_legacy_make_thread_shim_survives_mixed_generation_update():
+    """An old cached ``run_agent`` caller can meet the new watchdog class.
+
+    A live CLI can outlast an update launched by another Hermes process. The
+    old caller still invokes ``make_thread()`` while a lazy import resolves
+    the new scheduler-backed watchdog. Keep that transition harmless until
+    the CLI is restarted.
+    """
+    class _Agent:
+        session_id = "mixed-generation"
+        _last_activity_ts = time.time()
+        _turn_liveness_activity_generation = 0
+
+    stop_event = threading.Event()
+    watchdog = TurnLivenessWatchdog(
+        _Agent(),
+        session_id="mixed-generation",
+        timeout_s=60.0,
+        poll_s=0.01,
+        stop_event=stop_event,
+        activity_lock=threading.Lock(),
+        is_turn_active=lambda: True,
+        commit_abort=lambda _snapshot, _message: False,
+        deactivate_turn=lambda: None,
+    )
+
+    thread = watchdog.make_thread()
+    assert isinstance(thread, threading.Thread)
+    thread.start()
+    stop_event.set()
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()

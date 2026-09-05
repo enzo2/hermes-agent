@@ -116,6 +116,26 @@ class TurnLivenessWatchdog:
 
         return schedule(self._tick, self._poll_s)
 
+    def make_thread(self) -> threading.Thread:
+        """Return a legacy thread wrapper for a caller straddling an update.
+
+        The live integration uses :meth:`schedule`; this bridge is only for a
+        pre-update ``run_agent`` module that remains in memory while a lazy
+        import resolves this post-scheduler class. Without it, the old caller
+        fails on its next turn with ``AttributeError``. It can be removed once
+        no supported process can keep the pre-update caller alive.
+        """
+        def _legacy_watch() -> None:
+            while not self._stop_event.wait(self._poll_s):
+                if self._tick() is False:
+                    return
+
+        return threading.Thread(
+            target=_legacy_watch,
+            name="turn-liveness-watchdog",
+            daemon=True,
+        )
+
     def _tick(self):
         """One poll. Returns False when the watchdog is finished."""
         if self._stop_event.is_set():

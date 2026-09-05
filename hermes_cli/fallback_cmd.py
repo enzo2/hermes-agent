@@ -1,6 +1,6 @@
 """hermes fallback — manage the fallback provider chain (tried in order when the primary fails).
 
-Subcommands: ``list`` (default), ``add`` (same picker as `hermes model`), ``remove``, ``clear``.
+Subcommands: ``list`` (default), ``add`` (same picker as `hermes model`), ``remove``, ``reorder``, ``clear``.
 """
 from __future__ import annotations
 
@@ -215,18 +215,82 @@ def cmd_fallback_clear(args) -> None:  # noqa: ARG001
     print("\n  Fallback chain cleared.\n")
 
 
+def _resolve_chain_target(chain: List[Dict[str, Any]], target: str) -> int:
+    """Resolve a 1-based position or ``provider/model`` string to a 0-based index."""
+    target = target.strip()
+    if target.isdigit():
+        idx = int(target) - 1
+        if 0 <= idx < len(chain):
+            return idx
+        raise SystemExit(
+            f"No fallback entry at position {target}.  Chain has {_entries(len(chain))}."
+        )
+    needle = target.lower()
+    matches = [
+        i for i, entry in enumerate(chain)
+        if f"{entry.get('provider', '')}/{entry.get('model', '')}".lower() == needle
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        known = ", ".join(
+            f"{entry.get('provider', '?')}/{entry.get('model', '?')}" for entry in chain
+        )
+        raise SystemExit(f'No fallback entry matching "{target}".  Chain: {known}')
+    raise SystemExit(
+        f'Multiple fallback entries match "{target}" — use a position number instead.'
+    )
+
+
+def cmd_fallback_reorder(args) -> None:
+    """Move one fallback entry to the front of the chain (tried first)."""
+    from hermes_cli.config import save_config
+    from hermes_cli.setup import _curses_prompt_choice
+
+    config, chain = _load_chain("  No fallback providers configured — nothing to reorder.")
+    if chain is None:
+        return
+    if len(chain) == 1:
+        print(f"\n  Only one fallback entry ({_format_entry(chain[0])}) — already first.\n")
+        return
+
+    target = getattr(args, "target", None)
+    if target is None or not str(target).strip():
+        idx = _curses_prompt_choice(
+            "Move which fallback to the front of the chain?",
+            [_format_entry(e) for e in chain] + ["Cancel"], 0)
+        if idx is None or idx < 0 or idx >= len(chain):
+            print("\n  Cancelled — no change.")
+            return
+    else:
+        idx = _resolve_chain_target(chain, str(target))
+
+    if idx == 0:
+        print(f"\n  {_format_entry(chain[0])} is already first in the chain.\n")
+        return
+
+    moved = chain.pop(idx)
+    chain.insert(0, moved)
+    _write_chain(config, chain)
+    save_config(config)
+    print(f"\n  Moved to front: {_format_entry(moved)}")
+    _print_chain("New chain order", chain)
+    print()
+
+
 def cmd_fallback(args) -> None:
     """Top-level dispatcher for ``hermes fallback [subcommand]``."""
     sub = getattr(args, "fallback_command", None)
     handler = _SUBCOMMANDS.get(sub)
     if handler is None:
         print(f"Unknown fallback subcommand: {sub}")
-        print("Use one of: list, add, remove, clear")
+        print("Use one of: list, add, remove, reorder, clear")
         raise SystemExit(2)
     handler(args)
 
 
 _SUBCOMMANDS = {
     **dict.fromkeys((None, "", "list", "ls"), cmd_fallback_list), "add": cmd_fallback_add,
-    **dict.fromkeys(("remove", "rm"), cmd_fallback_remove), "clear": cmd_fallback_clear,
+    **dict.fromkeys(("remove", "rm"), cmd_fallback_remove), "reorder": cmd_fallback_reorder,
+    "clear": cmd_fallback_clear,
 }

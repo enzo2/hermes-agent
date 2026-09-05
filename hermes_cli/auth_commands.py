@@ -447,6 +447,40 @@ def auth_reset_command(args) -> None:
     print(f"Reset status on {count} {provider} credentials")
 
 
+def auth_reorder_command(args) -> None:
+    """Move one pooled credential to the front of its provider's pool."""
+    provider = _normalize_provider(getattr(args, "provider", ""))
+    pool = load_pool(provider)
+    if not pool.has_credentials():
+        print(f"No credentials for {provider}.")
+        return
+
+    target = getattr(args, "target", None)
+    if target is None:
+        for i, entry in enumerate(pool.entries(), 1):
+            marker = "←" if i == 1 else ""
+            print(
+                f"  #{i}  {entry.label:25s} {entry.auth_type:10s} "
+                f"{entry.source}{_format_exhausted_status(entry)} [id:{entry.id}] {marker}".rstrip()
+            )
+        raw = _ask(
+            "Move which credential to the top (#, id, or label; blank to cancel): ", line_input)
+        if not raw:
+            return
+        target = raw
+
+    index, matched, error = pool.resolve_target(target)
+    if matched is None or index is None:
+        raise SystemExit(f"{error} Provider: {provider}.")
+    moved = pool.move_to_front(index)
+    if moved is None:
+        raise SystemExit(f'No credential matching "{target}" for provider {provider}.')
+    if index == 1:
+        print(f'{provider} credential #{index} ("{moved.label}") is already at the top.')
+    else:
+        print(f'Moved {provider} credential #{index} ("{moved.label}") to the top of the pool.')
+
+
 def auth_status_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", "") or "")
     if not provider:
@@ -547,14 +581,16 @@ def _interactive_auth() -> None:
     print()
 
     choices = [
-        "Add a credential", "Remove a credential", "Reset cooldowns for a provider",
+        "Add a credential", "Remove a credential",
+        "Reorder credentials (move one to the top)",
+        "Reset cooldowns for a provider",
         "Set rotation strategy for a provider", "Exit"]
     print("What would you like to do?")
     for i, choice in enumerate(choices, 1):
         print(f"  {i}. {choice}")
     raw = _ask("\nChoice: ")
-    handler = {"1": _interactive_add, "2": _interactive_remove, "3": _interactive_reset,
-               "4": _interactive_strategy}.get(raw)
+    handler = {"1": _interactive_add, "2": _interactive_remove, "3": _interactive_reorder,
+               "4": _interactive_reset, "5": _interactive_strategy}.get(raw)
     if handler is not None:
         handler()
 
@@ -610,6 +646,11 @@ def _interactive_remove() -> None:
         auth_remove_command(SimpleNamespace(provider=provider, target=raw))
 
 
+def _interactive_reorder() -> None:
+    provider = _pick_provider("Provider to reorder credentials for")
+    auth_reorder_command(SimpleNamespace(provider=provider, target=None))
+
+
 def _interactive_reset() -> None:
     auth_reset_command(SimpleNamespace(provider=_pick_provider("Provider to reset cooldowns for")))
 
@@ -651,8 +692,8 @@ def _interactive_strategy() -> None:
 
 _AUTH_ACTIONS = {
     "add": auth_add_command, "list": auth_list_command, "remove": auth_remove_command,
-    "reset": auth_reset_command, "status": auth_status_command, "logout": auth_logout_command,
-    "spotify": auth_spotify_command}
+    "reset": auth_reset_command, "reorder": auth_reorder_command, "status": auth_status_command,
+    "logout": auth_logout_command, "spotify": auth_spotify_command}
 
 
 def auth_command(args) -> None:
